@@ -1,6 +1,6 @@
 #!/usr/bin/php
 <?php
-require_once(__DIR__."vendor/geoiploc.php");
+require_once(__DIR__."/vendor/geoiploc.php");
 
 class Log
 {
@@ -278,29 +278,6 @@ function read_logs ($files = [])
 	return $r;
 }
 
-function show_logs ($logs=[], &$off)
-{
-	$cols = exec("tput cols");
-	$rows = exec("tput lines");
-
-	$c = count($logs);
-	$lc = floor(log10(Log::getTotal())+1);
-	$ls = $cols-$lc-2;
-	$f = "\e[1m%'. ".$lc."u:\e[0m %s\n";
-
-	if (!is_numeric($off) || $off>$c-$rows+2) $off = $c-$rows+2;
-	if ($off<0) $off = 0;
-
-	echo "\e[4mRegistros ".($off+1)." a ".($off+$rows-2)." de ".$c.":\e[0m\n";
-	for ($i=$off; $i<$off+$rows-2; $i++) {
-		if ($i<$c) {
-			printf($f,$logs[$i]->getId(),mb_substr($logs[$i]->getCountryCode() . " " . $logs[$i]->getString(),0,$ls));
-		} else {
-			echo "\n";
-		}
-	}
-}
-
 function get_sorter ($property, $desc)
 {
 	$c = explode("_",strtolower($property));
@@ -338,23 +315,86 @@ function filter_by ($field, $value, $logs, $not=false) {
 	return $filtered;
 }
 
-function group_by ($field, $logs) {
-	$grouped = [];
+function group_by ($fields, $logs) {
 	$values = [];
 	foreach ($logs as $log) {
 		$add = true;
-		foreach ($values as $value) {
-			if ($log->getField($field)===$value) {
+		foreach ($values as $i => $value) {
+			$is_equals = true;
+			foreach ($fields as $field) {
+				$is_equals = $is_equals && $log->getField($field)===$value[$field];
+			}
+			if ($is_equals) {
 				$add = false;
+				$values[$i]["count"]++;
 				break;
 			}
 		}
 		if ($add) {
-			$values[] = $log->getField($field);
-			$grouped[] = $log;
+			$idx = count($values);
+			$values[] = [];
+			foreach ($fields as $field) {
+				$values[$idx][$field] = $log->getField($field);
+			}
+			$values[$idx]["count"] = 1;
 		}
 	}
-	return $grouped;
+	return $values;
+}
+
+function show_groups($groups, &$off, $fields) {
+
+	$cols = exec("tput cols");
+	$rows = exec("tput lines");
+
+	$total = count($groups);
+	$max_count = $groups[$total-1]["count"];
+	$lcount = floor(log10($max_count)+1);
+	$lrow = $cols-$lcount-2;
+	$f = "\e[1m%'. ".$lcount."u:\e[0m %s\n";
+
+	if (!is_numeric($off) || $off>$total-$rows+2) $off = $total-$rows+2;
+	if ($off<0) $off = 0;
+
+	echo "\e[4mAgrupación\e[0m por \e[4m".implode("\e[0m, \e[4m",$fields)."\e[0m. Resultados ".($off+1)." a ".($off+$rows-2)." de ".$total."\n";
+	for ($i=$off; $i<$off+$rows-2; $i++) {
+		if ($i<$total) {
+			$text = "";
+			foreach ($fields as $field) {
+				if (mb_strlen($text)>0) {
+					$text .= " ";
+				}
+				$text .= "[".$groups[$i][$field]."]";
+			}
+			printf($f,$groups[$i]["count"],mb_substr($text,0,$lrow));
+		} else {
+			echo "\n";
+		}
+	}
+
+}
+
+function show_logs ($logs=[], &$off)
+{
+	$cols = exec("tput cols");
+	$rows = exec("tput lines");
+
+	$c = count($logs);
+	$lc = floor(log10(Log::getTotal())+1);
+	$ls = $cols-$lc-2;
+	$f = "\e[1m%'. ".$lc."u:\e[0m %s\n";
+
+	if (!is_numeric($off) || $off>$c-$rows+2) $off = $c-$rows+2;
+	if ($off<0) $off = 0;
+
+	echo "\e[4mRegistros ".($off+1)." a ".($off+$rows-2)." de ".$c.":\e[0m\n";
+	for ($i=$off; $i<$off+$rows-2; $i++) {
+		if ($i<$c) {
+			printf($f,$logs[$i]->getId(),mb_substr($logs[$i]->getCountryCode() . " " . $logs[$i]->getString(),0,$ls));
+		} else {
+			echo "\n";
+		}
+	}
 }
 
 function help ()
@@ -399,6 +439,10 @@ echo "\n";
 $history = [];
 $offset = [];
 $position = -1;
+$grouped = false;
+$group_fields = [];
+$groups = [];
+$group_offset = 0;
 
 echo "Introduce una orden (`\e[1mhelp\e[0m` para mostrar la ayuda):\n";
 
@@ -414,6 +458,9 @@ do {
 		case "back":
 			$position--;
 			$draw = true;
+			$grouped = false;
+			$group_fields = [];
+			$group_offset = 0;
 			if ($position<0) {
 				echo "No se puede retroceder más en el historial.\n";
 				$position++;
@@ -423,6 +470,9 @@ do {
 		case "forward":
 			$position++;
 			$draw = true;
+			$grouped = false;
+			$group_fields = [];
+			$group_offset = 0;
 			if ($position>=count($history)) {
 				echo "No se puede avanzar más en el historial.\n";
 				$position--;
@@ -431,25 +481,44 @@ do {
 		break;
 		case "up":
 			if (isset($order[1]) && is_numeric($order[1])) {
-				$offset[$position] -= intval($order[1]);
+				if ($grouped) {
+					$group_offset -= intval($order[1]);
+				} else {
+					$offset[$position] -= intval($order[1]);
+				}
 			} else {
-				$offset[$position] -= intval(exec("tput lines")) - 2;
+				if ($grouped) {
+					$group_offset -= intval(exec("tput lines")) - 2;
+				} else {
+					$offset[$position] -= intval(exec("tput lines")) - 2;
+				}
 			}
 			$draw = true;
 		break;
 		case "down":
 			if (isset($order[1]) && is_numeric($order[1])) {
-				$offset[$position] += intval($order[1]);
+				if ($grouped) {
+					$group_offset += intval($order[1]);
+				} else {
+					$offset[$position] += intval($order[1]);
+				}
 			} else {
-				$offset[$position] += intval(exec("tput lines")) - 2;
+				if ($grouped) {
+					$group_offset += intval(exec("tput lines")) - 2;
+				} else {
+					$offset[$position] += intval(exec("tput lines")) - 2;
+				}
 			}
 			$draw = true;
 		break;
 		case "redraw":
-			if ($position<0 || $position>=count($history))
+			if ($position<0 || $position>=count($history)) {
 				echo "No has hecho ninguna búsqueda.\n";
-			else
+			} else {
 				$draw = true;
+				$grouped = false;
+				$group_fields = [];
+			}
 		break;
 		case "all":
 			for ($i=count($history)-1; $i>$position; $i--) {
@@ -460,6 +529,8 @@ do {
 			$history[] = $logs;
 			$offset[] = count($logs);
 			$draw = true;
+			$grouped = false;
+			$group_fields = [];
 		break;
 		case "show":
 			if ($position<0 || $position>=count($history)) {
@@ -485,6 +556,8 @@ do {
 					if ($position>=0&&isset($history[$position])) {
 						usort($history[$position],get_sorter($order[2],isset($order[3])&&$order[3]==="desc"));
 						$draw = true;
+						$grouped = false;
+						$group_fields = [];
 					} else {
 						echo "Debe hacer una selección para poder ordenarla.\n";
 					}
@@ -498,18 +571,28 @@ do {
 		break;
 		case "group":
 			if (isset($order[1]) && $order[1]==="by") {
-				if (isset($order[2]) && in_array($order[2],Log::getFields())) {
-					for ($i=count($history)-1; $i>$position; $i--) {
-						unset($history[$i]);
-						unset($offset[$i]);
+				if (isset($order[2])) {
+					$group_fields = explode(",",$order[2]);
+					$valid_fields = true;
+					foreach ($group_fields as $field) {
+						if (!in_array($field,Log::getFields())) {
+							$valid_fields = false;
+							break;
+						}
 					}
-					$position++;
-					$history[$position] = group_by($order[2],$history[$position-1]);
-					$offset[$position] = count($history[$position]);
-					$draw = true;
+					if ($valid_fields) {
+						$groups = group_by($group_fields, $history[$position]);
+						usort($groups, function ($a, $b) { return $a["count"] - $b["count"]; });
+						$group_offset = count($groups);
+						$grouped = true;
+						$draw = true;
+					} else {
+						$group_fields = [];
+						echo "Debe especificar uno o más campos válidos separados por ',' por los que agrupar.\n";
+						echo "Los campos disponibles son: \e[1m".implode("\e[0m, \e[1m",Log::getFields())."\e[0m.\n";
+					}
 				} else {
-					echo "Debe especificar un campo válido por el que agrupar:\n";
-					echo "Los campos disponibles son: \e[1m".implode("\e[0m, \e[1m",Log::getFields())."\e[0m.\n";
+					echo "Orden incomprensible. Introduce `\e[1mhelp\e[0m` para mostrar la lista de órdenes.\n";
 				}
 			} else {
 				echo "Orden incomprensible. Introduce `\e[1mhelp\e[0m` para mostrar la lista de órdenes.\n";
@@ -539,6 +622,8 @@ do {
 							$history[$position] = filter_by($order[$k],implode(" ",$search),$history[$position-1],$not);
 							$offset[$position] = count($history[$position]);
 							$draw = true;
+							$grouped = false;
+							$group_fields = [];
 						} else {
 							echo "Debe especificar el criterio de búsqueda.\n";
 						}
@@ -566,7 +651,11 @@ do {
 			echo "Orden no reconocida. Introduce `\e[1mhelp\e[0m` para mostrar la lista de órdenes.\n";
 	}
 	if ($draw) {
-		show_logs($history[$position],$offset[$position]);
+		if ($grouped) {
+			show_groups($groups,$group_offset,$group_fields);
+		} else {
+			show_logs($history[$position],$offset[$position]);
+		}
 	}
 } while ($order[0]!=="exit" && $order[0]!=="quit");
 ?>
