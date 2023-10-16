@@ -1,5 +1,7 @@
 #!/bin/bash
 
+BLOCK_SIZE=512
+
 if [[ $# -lt 1 ]]
 then
     echo "Usage: $0 <file-path>" >&2
@@ -15,5 +17,5 @@ fi
 FILENAME=$(readlink -f "$1")
 
 SIZE=$(du -b "$FILENAME" | cut -f 1)
-head -c $SIZE /dev/urandom > "$FILENAME"
+dd bs=$BLOCK_SIZE count=$SIZE iflag=count_bytes if=/dev/urandom of="$FILENAME"
 rm "$FILENAME"
