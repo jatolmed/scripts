@@ -14,5 +14,8 @@ Exports a KeepassXC file to a XML and encrypts it, destroying the intermediate X
 ## destroy-file.sh
 Destroys a file overriding it with random data.
 
+## destroy-dir.sh
+Destroys all files inside a directory recursively overriding them with random data.
+
 ## node-alternatives.sh
 Changes the current node installation.
