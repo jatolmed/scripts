@@ -172,9 +172,9 @@ command = "all"
 while command != "quit":
     parse_command(command)
     try:
-        command = input("\033[32;1m> \033[94;1m")
-        print("\033[0m", end="")
+        command = input("\u001b\033[32;1m> \u001b\033[94;1m")
+        print("\u001b\033[0m", end="")
         readline.add_history(command)
     except:
         command = "quit"
-        print("\033[0m")
+        print("\u001b\033[0m")
