@@ -3,6 +3,7 @@
 if [[ $# -lt 1 ]]
 then
     echo "Usage: $0 <database-file>" >&2
+    exit 0
 fi
 
 DB_FILE=$(readlink -f "$1")
@@ -10,6 +11,7 @@ DB_FILE=$(readlink -f "$1")
 if [[ ! -f "$DB_FILE" ]]
 then
     echo "'$1' is not a file." >&2
+    exit 1
 fi
 
 EXPORT_XML="$DB_FILE.xml"
